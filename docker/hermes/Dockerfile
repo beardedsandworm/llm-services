@@ -30,4 +30,3 @@ RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
         firecrawl-anydoc \
         marker-pdf
 
-USER hermes
