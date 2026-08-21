@@ -33,7 +33,7 @@ ensure_owned_dir "$HERMES_MODELS/ollama"
 # Everything below lives inside directories owned by the normal IX account.
 mkdir -p \
   "$HERMES_RUNTIME/memories" \
-  "$HERMES_RUNTIME/home/.ssh" \
+  "$HERMES_RUNTIME/.ssh" \
   "$GOLDEN_PATH/agents/leto/skills" \
   "$GOLDEN_PATH/agents/leto/job-histories"
 
@@ -47,7 +47,7 @@ if [[ ! -f "$GOLDEN_PATH/agents/leto/USER.md" ]]; then
   fi
 fi
 
-chmod 700 "$HERMES_RUNTIME/home/.ssh"
+chmod 700 "$HERMES_RUNTIME/.ssh"
 chmod 600 "$GOLDEN_PATH/agents/leto/USER.md"
 
 echo "Runtime directories ready."

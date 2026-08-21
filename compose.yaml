@@ -42,10 +42,9 @@ services:
 
       # Give Leto only the operational SSH identity prepared for the lab.
       # Do not mount IX's entire ~/.ssh directory or GitHub identity.
-      - "/home/lightweight/.ssh/id_ed25519_leto:/opt/data/home/.ssh/id_ed25519_leto:ro"
-      - "/home/lightweight/.ssh/config:/opt/data/home/.ssh/config:ro"
-      - "/home/lightweight/.ssh/known_hosts:/opt/data/home/.ssh/known_hosts:ro"
-
+      - "/home/lightweight/.ssh/id_ed25519_leto:/opt/data/.ssh/id_ed25519_leto:ro"
+      - "/home/lightweight/.ssh/config:/opt/data/.ssh/config:ro"
+      
       # Shared model/cache area for future local inference.
       - "${HERMES_MODELS}:/models"
 
