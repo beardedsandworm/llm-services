@@ -1,0 +1,14 @@
+# Runtime state and secrets never belong in this repository
+.env
+.env.*
+!.env.example
+runtime/
+secrets/
+*.key
+*.pem
+
+# Local editor / OS noise
+.DS_Store
+*.swp
+*.swo
+*~

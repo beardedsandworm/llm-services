@@ -1,0 +1,75 @@
+services:
+  hermes:
+    build:
+      context: ./docker/hermes
+    image: wormlogic/hermes-agent:local
+    container_name: hermes
+    restart: unless-stopped
+    command: ["gateway", "run"]
+
+    environment:
+      HERMES_UID: ${HERMES_UID}
+      HERMES_GID: ${HERMES_GID}
+
+      # Machine-level dashboard. Authentication is configured inside the
+      # persistent Hermes .env/config before we expose it through Caddy.
+      HERMES_DASHBOARD: "1"
+
+      # API groundwork for future Kami/custom clients. The API still requires
+      # API_SERVER_ENABLED/HOST/KEY in Hermes' private runtime .env.
+      # Nothing here supplies or versions those secrets.
+
+    ports:
+      - "${IX_LAN_IP}:9119:9119"
+      - "${IX_LAN_IP}:8642:8642"
+
+    volumes:
+      # Hermes-owned mutable runtime: auth, config, sessions, logs, memory,
+      # cron state, caches, per-profile homes, etc.
+      - "${HERMES_RUNTIME}:/opt/data"
+
+      # Golden Path is Leto's durable institutional workspace.
+      - "${GOLDEN_PATH}:/workspace/golden-path"
+
+      # Leto's agent-owned identity and learned skills are versioned in
+      # golden-path but presented at Hermes' native paths.
+      - "${GOLDEN_PATH}/agents/leto/SOUL.md:/opt/data/SOUL.md"
+      - "${GOLDEN_PATH}/agents/leto/skills:/opt/data/skills"
+
+      # USER.md stays outside Git but lives beside the agent material on the
+      # host. Hermes sees it at its native memory path and may evolve it.
+      - "${GOLDEN_PATH}/agents/leto/USER.md:/opt/data/memories/USER.md"
+
+      # Give Leto only the operational SSH identity prepared for the lab.
+      # Do not mount IX's entire ~/.ssh directory or GitHub identity.
+      - "/home/lightweight/.ssh/id_ed25519_leto:/opt/data/home/.ssh/id_ed25519_leto:ro"
+      - "/home/lightweight/.ssh/config:/opt/data/home/.ssh/config:ro"
+      - "/home/lightweight/.ssh/known_hosts:/opt/data/home/.ssh/known_hosts:ro"
+
+      # Shared model/cache area for future local inference.
+      - "${HERMES_MODELS}:/models"
+
+    networks:
+      - ix
+
+  # Groundwork only. This service does not launch unless explicitly requested:
+  #
+  #   docker compose --profile local-inference up -d ollama
+  #
+  # Ollama is not a commitment to the eventual local-model runtime; it gives us
+  # an immediately usable OpenAI-adjacent local inference endpoint for
+  # experiments without changing Hermes or the network topology.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    profiles: ["local-inference"]
+    volumes:
+      - "${HERMES_MODELS}/ollama:/root/.ollama"
+    networks:
+      - ix
+
+networks:
+  ix:
+    name: ix
+    driver: bridge
