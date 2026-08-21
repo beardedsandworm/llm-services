@@ -8,7 +8,34 @@ HERMES_MODELS="${HERMES_MODELS:-$IX_ROOT/models}"
 
 echo "Preparing IX LLM runtime directories..."
 
-mkdir -p   "$HERMES_RUNTIME/memories"   "$HERMES_RUNTIME/home/.ssh"   "$HERMES_MODELS/ollama"   "$GOLDEN_PATH/agents/leto/skills"   "$GOLDEN_PATH/agents/leto/job-histories"
+owner_user="$(id -un)"
+owner_group="$(id -gn)"
+
+ensure_owned_dir() {
+  local dir="$1"
+
+  if [[ ! -d "$dir" ]]; then
+    echo "Creating $dir..."
+    sudo install -d -o "$owner_user" -g "$owner_group" "$dir"
+  elif [[ ! -w "$dir" ]]; then
+    echo "Correcting ownership of $dir..."
+    sudo chown "$owner_user:$owner_group" "$dir"
+  fi
+}
+
+# These paths may need privilege to establish under /srv/ix.
+# Build them in order so parent directories have the intended ownership.
+ensure_owned_dir "$IX_ROOT/runtime"
+ensure_owned_dir "$HERMES_RUNTIME"
+ensure_owned_dir "$HERMES_MODELS"
+ensure_owned_dir "$HERMES_MODELS/ollama"
+
+# Everything below lives inside directories owned by the normal IX account.
+mkdir -p \
+  "$HERMES_RUNTIME/memories" \
+  "$HERMES_RUNTIME/home/.ssh" \
+  "$GOLDEN_PATH/agents/leto/skills" \
+  "$GOLDEN_PATH/agents/leto/job-histories"
 
 if [[ ! -f "$GOLDEN_PATH/agents/leto/USER.md" ]]; then
   if [[ -f "$GOLDEN_PATH/USER.md" ]]; then
