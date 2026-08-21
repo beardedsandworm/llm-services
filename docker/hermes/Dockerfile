@@ -23,10 +23,11 @@ RUN apt-get update \
 # Hermes intentionally keeps several capabilities optional/lazy upstream.
 # In our container image they are explicit so launch never depends on a
 # runtime package install.
-RUN /opt/hermes/.venv/bin/python -m pip install --no-cache-dir \
+RUN uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
         faster-whisper \
         edge-tts \
         "discord.py[voice]" \
-        firecrawl-anydoc
+        firecrawl-anydoc \
+        marker-pdf
 
 USER hermes
