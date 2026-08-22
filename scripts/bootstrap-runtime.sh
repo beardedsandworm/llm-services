@@ -50,6 +50,21 @@ fi
 chmod 700 "$HERMES_RUNTIME/.ssh"
 chmod 600 "$GOLDEN_PATH/agents/leto/USER.md"
 
+# Keep Hermes-native identity paths linked to the agent-owned Golden Path files.
+# These are container-visible paths; the links intentionally appear dangling
+# from the host filesystem.
+ln -sfn \
+  /workspace/golden-path/agents/leto/SOUL.md \
+  "$HERMES_RUNTIME/SOUL.md"
+
+ln -sfn \
+  /workspace/golden-path/agents/leto/USER.md \
+  "$HERMES_RUNTIME/memories/USER.md"
+
+# Bundled Hermes skills are provided separately as an external catalog.
+# Do not seed them into the agent-owned/versioned skills directory.
+touch "$HERMES_RUNTIME/.no-bundled-skills"
+
 echo "Runtime directories ready."
 echo
 echo "Before first launch:"

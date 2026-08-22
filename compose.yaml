@@ -10,6 +10,7 @@ services:
     environment:
       HERMES_UID: ${HERMES_UID}
       HERMES_GID: ${HERMES_GID}
+      HERMES_WRITE_SAFE_ROOT: "/opt/data:/workspace/golden-path/agents/leto/SOUL.md:/workspace/golden-path/agents/leto/USER.md:/workspace/golden-path/agents/leto/skills:/workspace/golden-path/agents/leto/job-histories"
 
       # Machine-level dashboard. Authentication is configured inside the
       # persistent Hermes .env/config before we expose it through Caddy.
@@ -33,12 +34,10 @@ services:
 
       # Leto's agent-owned identity and learned skills are versioned in
       # golden-path but presented at Hermes' native paths.
-      - "${GOLDEN_PATH}/agents/leto/SOUL.md:/opt/data/SOUL.md"
       - "${GOLDEN_PATH}/agents/leto/skills:/opt/data/skills"
 
       # USER.md stays outside Git but lives beside the agent material on the
       # host. Hermes sees it at its native memory path and may evolve it.
-      - "${GOLDEN_PATH}/agents/leto/USER.md:/opt/data/memories/USER.md"
 
       # Give Leto only the operational SSH identity prepared for the lab.
       # Do not mount IX's entire ~/.ssh directory or GitHub identity.
