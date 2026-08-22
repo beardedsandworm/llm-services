@@ -8,6 +8,7 @@ services:
     command: ["gateway", "run"]
 
     environment:
+      TZ: America/New_York
       HERMES_UID: ${HERMES_UID}
       HERMES_GID: ${HERMES_GID}
       HERMES_WRITE_SAFE_ROOT: "/opt/data:/workspace/golden-path/agents/leto/SOUL.md:/workspace/golden-path/agents/leto/USER.md:/workspace/golden-path/agents/leto/skills:/workspace/golden-path/agents/leto/job-histories"
