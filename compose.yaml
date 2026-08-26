@@ -9,6 +9,8 @@ services:
 
     environment:
       TZ: America/New_York
+      N8N_API_BASE_URL: https://ops.wormlogic.com
+      N8N_LETO_API_KEY_FILE: /run/secrets/n8n-leto-api-key
       HERMES_UID: ${HERMES_UID}
       HERMES_GID: ${HERMES_GID}
       HERMES_WRITE_SAFE_ROOT: "/opt/data:/workspace/golden-path/agents/leto/SOUL.md:/workspace/golden-path/agents/leto/USER.md:/workspace/golden-path/agents/leto/skills:/workspace/golden-path/agents/leto/job-histories"
@@ -44,6 +46,8 @@ services:
       # Do not mount IX's entire ~/.ssh directory or GitHub identity.
       - "/home/lightweight/.ssh/id_ed25519_leto:/opt/data/.ssh/id_ed25519_leto:ro"
       - "/home/lightweight/.ssh/config:/opt/data/.ssh/config:ro"
+      # Root-managed, read-only n8n API key; never version the value.
+      - "/etc/wormlogic/secrets/n8n-leto-api-key:/run/secrets/n8n-leto-api-key:ro"
       
       # Shared model/cache area for future local inference.
       - "${HERMES_MODELS}:/models"
