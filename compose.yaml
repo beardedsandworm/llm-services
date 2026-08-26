@@ -63,6 +63,9 @@ services:
     container_name: ollama
     restart: unless-stopped
     profiles: ["local-inference"]
+    gpus: all
+    environment:
+      OLLAMA_CONTEXT_LENGTH: "131072"
     volumes:
       - "${HERMES_MODELS}/ollama:/root/.ollama"
     networks:
