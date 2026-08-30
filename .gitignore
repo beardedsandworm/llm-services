@@ -3,7 +3,12 @@
 .env.*
 !.env.example
 runtime/
-secrets/
+
+# Ignore everything under secrets except encrypted SOPS artifacts
+secrets/**
+!secrets/**/
+!secrets/**/*.enc
+
 *.key
 *.pem
 
