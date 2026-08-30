@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: ^secrets/server02/.*\.enc$
+    age: age18rckctrg0shvfgmxvg3lqrtdu4qgmdwjp3sahv5vynzcsp5qhp5snux7sk
