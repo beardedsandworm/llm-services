@@ -1,0 +1,16 @@
+[Unit]
+Description=Internal DNS monitor from IX LAN-client vantage
+Documentation=file:///usr/local/share/doc/internal-dns-monitor/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=lightweight
+Group=lightweight
+ExecStart=/usr/local/lib/internal-dns-monitor/monitor.py --config /etc/internal-dns-monitor/config.env
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/internal-dns-monitor

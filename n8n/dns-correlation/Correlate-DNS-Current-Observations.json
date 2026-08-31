@@ -1,0 +1,212 @@
+{
+  "id": "6aOCYolK7VbF4oit",
+  "name": "Correlate DNS Current Observations",
+  "active": true,
+  "description": "Receives compact current observations from the external and ordinary-LAN monitors, stores bounded workflow staticData, and promotes only actionable canonical transitions to Operational Event Ingress. External direct-Midway evidence is diagnostic-only; IX clients never supply direct-Midway checks.",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leto/dns-observations",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth"
+      },
+      "id": "b4e2a9bc-5fb9-442c-9de7-41fcc3c57487",
+      "webhookId": "d4664a65-4ca8-4778-856d-41a1e523d12d",
+      "name": "Authenticated DNS Observation Ingress",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9Vdr1wK5TTVW4Kbu",
+          "name": "Leto Operations \u2014 Event Ingress"
+        }
+      },
+      "notes": "Uses existing Header Auth credential metadata. No credential values are present in this export."
+    },
+    {
+      "parameters": {
+        "jsCode": "// DNS correlation v1: state is intentionally small and workflow-local.\n// This endpoint receives only compact *current* observations. Probe authority stays\n// with the monitors; this workflow derives cross-vantage condition transitions.\nconst body = $json.body ?? $json;\nconst nowMs = Date.now();\nconst now = new Date(nowMs).toISOString();\nconst INTERNAL = 'internal-dns-monitor';\nconst EXTERNAL = 'external-dns-resilience';\nconst ACCEPTED = new Set([INTERNAL, EXTERNAL]);\nconst CONDITION_NAMES = [\n  'dns_service_impact',\n  'individual_resolver_degradation',\n  'lan_resolver_selection_failure',\n  'external_path_impairment',\n  'midway_recursion_instability',\n  'internal_observer_stale',\n];\n// Midway-only evidence is intentionally never delivered to Operational Event Ingress.\nconst ACTIONABLE = new Set(CONDITION_NAMES.filter(name => name !== 'midway_recursion_instability'));\nconst FRESH_MS = 6 * 60 * 1000;\nconst BOOTSTRAP_GRACE_MS = 6 * 60 * 1000;\nconst RETENTION_MS = 48 * 60 * 60 * 1000;\nconst MAX_OBSERVERS = 8;\nconst MAX_DELIVERIES = 32;\n\nfunction reject(message, details = {}) {\n  return [{ json: {\n    responseCode: 400,\n    response: { accepted: false, error: 'invalid_dns_observation', message, details },\n    deliveryQueue: [],\n  }}];\n}\nfunction bool(value) { return typeof value === 'boolean'; }\nfunction validExecution(value) {\n  return value && typeof value === 'object' &&\n    typeof value.host === 'string' && value.host.length > 0 &&\n    typeof value.vantage === 'string' && value.vantage.length > 0;\n}\nfunction observerSummary(source, checks) {\n  if (source === INTERNAL) return {\n    client_path: checks.client_path,\n    resolvers: { pihole_a: checks.resolvers.pihole_a, pihole_b: checks.resolvers.pihole_b },\n  };\n  return {\n    external_path: checks.external_path,\n    resolvers: { pihole_a: checks.resolvers.pihole_a, pihole_b: checks.resolvers.pihole_b },\n    midway_recursion: checks.midway_recursion,\n  };\n}\n\nif (!body || typeof body !== 'object' || Array.isArray(body)) return reject('Body must be one observation object');\nconst required = ['contract_version', 'source', 'observed_at', 'sequence', 'execution', 'checks'];\nconst missing = required.filter(key => body[key] === undefined || body[key] === null || body[key] === '');\nif (missing.length) return reject('Missing required fields', { missing });\nif (body.contract_version !== '1.0') return reject('Unsupported contract_version', { expected: '1.0' });\nif (!ACCEPTED.has(body.source)) return reject('Unsupported source', { accepted_sources: [...ACCEPTED] });\nif (!Number.isSafeInteger(body.sequence) || body.sequence < 0) return reject('sequence must be a non-negative integer');\nif (!validExecution(body.execution)) return reject('execution.host and execution.vantage are required strings');\nconst observedMs = Date.parse(body.observed_at);\nif (!Number.isFinite(observedMs) || observedMs > nowMs + 5 * 60 * 1000) return reject('observed_at must be ISO-8601 and not more than five minutes in the future');\nconst checks = body.checks;\nif (!checks || typeof checks !== 'object' || !checks.resolvers || typeof checks.resolvers !== 'object') return reject('checks.resolvers is required');\nif (!bool(checks.resolvers.pihole_a) || !bool(checks.resolvers.pihole_b)) return reject('checks.resolvers.pihole_a and checks.resolvers.pihole_b must be booleans');\nif (body.source === INTERNAL) {\n  // Critical policy boundary: ordinary IX/LAN clients must not query Midway directly.\n  if (Object.hasOwn(checks, 'midway_recursion')) return reject('Internal observations must not include direct Midway evidence');\n  if (!bool(checks.client_path)) return reject('Internal observations require checks.client_path boolean');\n}\nif (body.source === EXTERNAL) {\n  if (!bool(checks.external_path) || !bool(checks.midway_recursion)) return reject('External observations require checks.external_path and checks.midway_recursion booleans');\n}\n\nconst store = $getWorkflowStaticData('global');\nif (store.schema !== 1) {\n  // Only bounded state: latest observer summaries, six condition episodes, and a\n  // short delivery audit. This intentionally replaces unavailable Data Tables.\n  Object.assign(store, {\n    schema: 1,\n    bootstrapped_at: now,\n    observers: {},\n    conditions: {},\n    pending_events: {},\n    delivered_event_ids: {},\n    delivery_audit: [],\n  });\n}\nstore.observers ??= {};\nstore.conditions ??= {};\nstore.pending_events ??= {};\nstore.delivered_event_ids ??= {};\nstore.delivery_audit ??= [];\nconst previous = store.observers[body.source];\nif (previous && body.sequence <= previous.sequence) {\n  return [{ json: {\n    responseCode: 202,\n    response: { accepted: true, duplicate_or_out_of_order: true, source: body.source, sequence: body.sequence },\n    deliveryQueue: [],\n  }}];\n}\n\nstore.observers[body.source] = {\n  sequence: body.sequence,\n  received_at: now,\n  observed_at: body.observed_at,\n  execution: { host: body.execution.host, vantage: body.execution.vantage, runtime_revision: body.execution.runtime_revision ?? null },\n  checks: observerSummary(body.source, checks),\n};\n// Prune old/unknown observers and hard-bound retention even if new sources are added later.\nfor (const [source, observer] of Object.entries(store.observers)) {\n  if (!Number.isFinite(Date.parse(observer.received_at)) || nowMs - Date.parse(observer.received_at) > RETENTION_MS) delete store.observers[source];\n}\nconst orderedSources = Object.entries(store.observers).sort((a, b) => Date.parse(b[1].received_at) - Date.parse(a[1].received_at));\nfor (const [source] of orderedSources.slice(MAX_OBSERVERS)) delete store.observers[source];\n\nconst internal = store.observers[INTERNAL];\nconst external = store.observers[EXTERNAL];\nconst internalFresh = Boolean(internal) && nowMs - Date.parse(internal.received_at) <= FRESH_MS;\nconst desired = Object.fromEntries(CONDITION_NAMES.map(name => [name, false]));\n\nif (internalFresh) {\n  const i = internal.checks;\n  if (!i.client_path) {\n    // A failed client path with both direct Pi-hole checks healthy is resolver\n    // selection/path trouble, not evidence that the DNS service itself is down.\n    if (i.resolvers.pihole_a && i.resolvers.pihole_b) desired.lan_resolver_selection_failure = true;\n    else desired.dns_service_impact = true;\n  } else if (i.resolvers.pihole_a !== i.resolvers.pihole_b) {\n    desired.individual_resolver_degradation = true;\n  }\n} else if (nowMs - Date.parse(store.bootstrapped_at) >= BOOTSTRAP_GRACE_MS) {\n  // Loss of LAN-side corroboration is observable only when a webhook call arrives.\n  desired.internal_observer_stale = true;\n}\n\nif (external) {\n  const e = external.checks;\n  if (!e.external_path && internalFresh && internal.checks.client_path) {\n    desired.external_path_impairment = true;\n  }\n  // The only permitted direct Midway evidence is from the external observer.\n  // It is diagnostic only and does not become an operational-ingress event.\n  if (!e.midway_recursion && internalFresh && internal.checks.client_path &&\n      internal.checks.resolvers.pihole_a && internal.checks.resolvers.pihole_b) {\n    desired.midway_recursion_instability = true;\n  }\n}\n\nfunction eventFor(condition, transition, episode, evidence) {\n  const open = transition === 'opened';\n  return {\n    contract_version: '1.0',\n    event_id: `dns-correlation-state:${condition}:${transition}:${episode}`,\n    incident_key: `dns-correlation-state:${condition}`,\n    source: 'dns-correlation-state',\n    owner: 'network',\n    category: 'dns',\n    severity: condition === 'dns_service_impact' ? 'critical' : 'warning',\n    state: open ? 'degraded' : 'healthy',\n    transition,\n    title: `${condition.replaceAll('_', ' ')} ${transition}`,\n    message: open\n      ? `DNS correlation opened ${condition} from compact current observations.`\n      : `DNS correlation recovered ${condition} from compact current observations.`,\n    occurred_at: now,\n    execution: { host: 'n8n', vantage: 'dns-correlation-state', runtime_revision: 'workflow-staticdata-v1' },\n    details: { condition, episode, evidence },\n  };\n}\nfunction queuePending(event) {\n  if (store.delivered_event_ids[event.event_id]) return;\n  store.pending_events[event.event_id] ??= { event, queued_at: now };\n}\n\nconst transitions = [];\nlet deliveryQueue = [];\nconst diagnosticTransitions = [];\nconst evidence = {\n  received_source: body.source,\n  received_sequence: body.sequence,\n  internal_fresh: internalFresh,\n  observers: Object.fromEntries(Object.entries(store.observers).map(([source, o]) => [source, {\n    observed_at: o.observed_at, execution: o.execution, checks: o.checks,\n  }])),\n};\nfor (const condition of CONDITION_NAMES) {\n  const episode = store.conditions[condition] ?? { open: false, episode: 0 };\n  const open = Boolean(episode.open);\n  if (open === desired[condition]) continue;\n  const transition = desired[condition] ? 'opened' : 'recovered';\n  if (desired[condition]) episode.episode += 1;\n  episode.open = desired[condition];\n  episode.changed_at = now;\n  episode.last_evidence = evidence;\n  store.conditions[condition] = episode;\n  const transitionRecord = { condition, transition, episode: episode.episode, occurred_at: now };\n  transitions.push(transitionRecord);\n  if (!ACTIONABLE.has(condition)) {\n    diagnosticTransitions.push(transitionRecord);\n    continue;\n  }\n  queuePending(eventFor(condition, transition, episode.episode, evidence));\n}\n// Backfill any current open episode lacking a recorded ingress acceptance. This\n// recovers pre-outbox state safely: ingress deduplicates the stable event ID.\nfor (const condition of CONDITION_NAMES) {\n  const episode = store.conditions[condition];\n  if (ACTIONABLE.has(condition) && episode?.open && episode.episode > 0) {\n    queuePending(eventFor(condition, 'opened', episode.episode, episode.last_evidence ?? evidence));\n  }\n}\ndeliveryQueue = Object.values(store.pending_events)\n  .sort((a, b) => String(a.queued_at).localeCompare(String(b.queued_at)))\n  .map(entry => entry.event);\n\nreturn [{ json: {\n  responseCode: 202,\n  response: {\n    accepted: true,\n    source: body.source,\n    sequence: body.sequence,\n    derived_conditions: Object.entries(desired).filter(([, open]) => open).map(([name]) => name),\n    transitions,\n    promoted_count: deliveryQueue.length,\n    unalerted_diagnostic_transitions: diagnosticTransitions,\n  },\n  deliveryQueue,\n}}];"
+      },
+      "id": "86f88d51-78be-426b-b6a1-b1467114623b",
+      "name": "Correlate Current Observation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "notes": "Bounded staticData replaces unavailable Data Tables. Internal direct-Midway evidence is rejected by contract."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Correlate Current Observation').first().json.response }}",
+        "options": {
+          "responseCode": "={{ $('Correlate Current Observation').first().json.responseCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "55f0f84e-0fb7-48cc-a9e3-d3817c771542",
+      "name": "Respond Observation Accepted or Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        0
+      ],
+      "notes": "Returns 400 for malformed observations and 202 after correlation state is committed; promotion is intentionally asynchronous."
+    },
+    {
+      "parameters": {
+        "jsCode": "// The response was already sent (202/400). Emit only actionable transition events.\nconst result = $('Correlate Current Observation').first().json;\nif (result.responseCode !== 202 || !Array.isArray(result.deliveryQueue)) return [];\nreturn result.deliveryQueue.map(event => ({ json: { event } }));"
+      },
+      "id": "a1d624ea-f8d0-49d2-a942-cc2cf3c88c77",
+      "name": "Expand Actionable Transition Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "notes": "Midway-only diagnostic transitions never appear in this queue."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5678/webhook/leto/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.event }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "465c2b6a-a809-4c93-9de0-1c18dffbe8c2",
+      "name": "Send Actionable Transition to Operational Event Ingress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9Vdr1wK5TTVW4Kbu",
+          "name": "Leto Operations \u2014 Event Ingress"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Only actionable opened/recovered canonical conditions are sent. Uses existing Header Auth credential metadata; no secret is exported."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Acknowledgement is durable workflow state, separate from condition truth.\nconst store = $getWorkflowStaticData('global');\nstore.pending_events ??= {};\nstore.delivered_event_ids ??= {};\nstore.delivery_audit ??= [];\nconst event = $('Expand Actionable Transition Events').item.json.event;\ndelete store.pending_events[event.event_id];\nstore.delivered_event_ids[event.event_id] = new Date().toISOString();\nconst delivered = Object.entries(store.delivered_event_ids).sort((a, b) => String(a[1]).localeCompare(String(b[1])));\nfor (const [eventId] of delivered.slice(0, Math.max(0, delivered.length - 32))) delete store.delivered_event_ids[eventId];\nstore.delivery_audit.push({ event_id: event.event_id, result: 'accepted_by_ingress', at: new Date().toISOString() });\nif (store.delivery_audit.length > 32) store.delivery_audit.splice(0, store.delivery_audit.length - 32);\nreturn [{ json: { recorded: true, event_id: event.event_id } }];"
+      },
+      "id": "5653efb6-eaca-4241-9d6e-d5215cddb8c7",
+      "name": "Record Ingress Promotion Acceptance",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retain the exact event for a later current observation; never regenerate an ID.\nconst store = $getWorkflowStaticData('global');\nstore.pending_events ??= {};\nstore.delivery_audit ??= [];\nconst event = $('Expand Actionable Transition Events').item.json.event;\nstore.pending_events[event.event_id] ??= { event, queued_at: new Date().toISOString() };\nstore.delivery_audit.push({ event_id: event.event_id, result: 'ingress_delivery_failed', at: new Date().toISOString(), node: $json.error?.node?.name ?? 'HTTP Request' });\nif (store.delivery_audit.length > 32) store.delivery_audit.splice(0, store.delivery_audit.length - 32);\nreturn [{ json: { recorded: true, result: 'ingress_delivery_failed', event_id: event.event_id } }];"
+      },
+      "id": "6e6ad5f0-a8e4-4c57-b7a6-bb743b753d42",
+      "name": "Record Ingress Promotion Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        120
+      ],
+      "notes": "Failure is retained as bounded audit metadata after the caller already received its accepted/rejected response."
+    }
+  ],
+  "connections": {
+    "Authenticated DNS Observation Ingress": {
+      "main": [
+        [
+          {
+            "node": "Correlate Current Observation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correlate Current Observation": {
+      "main": [
+        [
+          {
+            "node": "Respond Observation Accepted or Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Observation Accepted or Rejected": {
+      "main": [
+        [
+          {
+            "node": "Expand Actionable Transition Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Actionable Transition Events": {
+      "main": [
+        [
+          {
+            "node": "Send Actionable Transition to Operational Event Ingress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Actionable Transition to Operational Event Ingress": {
+      "main": [
+        [
+          {
+            "node": "Record Ingress Promotion Acceptance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Ingress Promotion Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
