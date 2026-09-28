@@ -75,6 +75,31 @@ services:
     networks:
       - ix
 
+  homepage-docker-proxy:
+    image: lscr.io/linuxserver/socket-proxy:latest
+    container_name: homepage-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+      ALLOW_ARCHIVE: 0
+      ALLOW_CHANGES: 0
+      ALLOW_EXPORT: 0
+      ALLOW_LOGS: 0
+      ALLOW_TOP: 0
+      ALLOW_START: 0
+      ALLOW_STOP: 0
+      ALLOW_RESTARTS: 0
+      ALLOW_PAUSE: 0
+      ALLOW_UNPAUSE: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "10.42.20.5:2375:2375"
+    read_only: true
+    tmpfs:
+      - /run
+
 networks:
   ix:
     name: ix
