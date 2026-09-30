@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for newer llm-services images and notify
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lightweight
+WorkingDirectory=/home/lightweight/llm-services
+Environment=MACHINE_ID=server02
+ExecStart=/home/lightweight/llm-services/scripts/image-check.sh

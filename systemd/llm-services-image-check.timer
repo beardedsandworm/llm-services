@@ -1,0 +1,12 @@
+[Unit]
+Description=Run llm-services image update check daily
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=15min
+AccuracySec=1min
+Persistent=true
+Unit=llm-services-image-check.service
+
+[Install]
+WantedBy=timers.target
