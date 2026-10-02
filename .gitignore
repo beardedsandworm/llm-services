@@ -1,7 +1,7 @@
 # Runtime state and secrets never belong in this repository
-.env
-.env.*
-!.env.example
+env/**
+!env/*.env.example
+
 runtime/
 
 # Ignore everything under secrets except encrypted SOPS artifacts
@@ -17,3 +17,4 @@ secrets/**
 *.swp
 *.swo
 *~
+

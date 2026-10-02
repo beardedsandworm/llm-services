@@ -2,7 +2,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${REPO_ROOT}/env/server02.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "✗ Missing Compose environment: $ENV_FILE" >&2
+    echo "  Restore it from secrets/server02/env/server02.env.enc before using ./dc." >&2
+    exit 1
+fi
 
 exec docker compose \
-  --project-directory "${REPO_ROOT}" \
-  "$@"
+    --project-directory "$REPO_ROOT" \
+    --env-file "$ENV_FILE" \
+    "$@"
