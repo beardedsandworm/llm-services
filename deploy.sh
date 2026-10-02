@@ -5,11 +5,17 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 MACHINE_ID="server02"
 REPO_NAME="llm-services"
 
+ENV_FILE="$REPO_ROOT/env/${MACHINE_ID}.env"
+ENV_RECOVERY="$REPO_ROOT/secrets/${MACHINE_ID}/env/${MACHINE_ID}.env.enc"
+RUNTIME_SECRETS="$REPO_ROOT/runtime/${MACHINE_ID}/secrets"
+
 DEPLOY_KEY="${HOME}/.ssh/id_ed25519_git_${REPO_NAME}"
 DEPLOY_KEY_PUB="${DEPLOY_KEY}.pub"
 
 IMAGE_CHECK_SERVICE="llm-services-image-check.service"
 IMAGE_CHECK_TIMER="llm-services-image-check.timer"
+
+DNS_MONITOR_TIMER="internal-dns-monitor.timer"
 
 cd "$REPO_ROOT"
 
@@ -28,12 +34,22 @@ require_file() {
     [[ -f "$1" ]] || die "Required file not found: $1"
 }
 
+require_command() {
+    command -v "$1" >/dev/null 2>&1 \
+        || die "Required command not found: $1"
+}
+
 
 # --------------------------------------------------
 # Validate repository
 # --------------------------------------------------
 
 step "Validating llm-services repository"
+
+require_command git
+require_command sops
+require_command docker
+require_command ssh-keygen
 
 require_file "$REPO_ROOT/scripts/decrypt-secrets.sh"
 require_file "$REPO_ROOT/scripts/bootstrap-runtime.sh"
@@ -42,6 +58,7 @@ require_file "$REPO_ROOT/systemd/$IMAGE_CHECK_SERVICE"
 require_file "$REPO_ROOT/systemd/$IMAGE_CHECK_TIMER"
 require_file "$REPO_ROOT/dc"
 require_file "$REPO_ROOT/compose.yaml"
+require_file "$ENV_RECOVERY"
 
 git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     || die "$REPO_ROOT is not a Git repository"
@@ -57,7 +74,37 @@ step "Decrypting service secrets"
 
 "$REPO_ROOT/scripts/decrypt-secrets.sh"
 
-printf '✓ Secrets materialized\n'
+require_file "$RUNTIME_SECRETS/leto_ops_ingress_token"
+require_file "$RUNTIME_SECRETS/n8n-leto-api-key"
+
+printf '✓ Runtime secrets materialized\n'
+
+
+# --------------------------------------------------
+# Compose environment
+# --------------------------------------------------
+
+step "Restoring Compose environment"
+
+mkdir -p "$(dirname -- "$ENV_FILE")"
+
+ENV_TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+trap 'rm -f "${ENV_TMP:-}"' EXIT
+
+sops --decrypt \
+    --input-type json \
+    --output-type binary \
+    "$ENV_RECOVERY" \
+    > "$ENV_TMP"
+
+[[ -s "$ENV_TMP" ]] \
+    || die "Recovered Compose environment is empty"
+
+chmod 600 "$ENV_TMP"
+mv -f "$ENV_TMP" "$ENV_FILE"
+ENV_TMP=""
+
+printf '✓ Compose environment restored: %s\n' "$ENV_FILE"
 
 
 # --------------------------------------------------
@@ -69,6 +116,17 @@ step "Bootstrapping runtime"
 "$REPO_ROOT/scripts/bootstrap-runtime.sh"
 
 printf '✓ Runtime ready\n'
+
+
+# --------------------------------------------------
+# Validate Compose
+# --------------------------------------------------
+
+step "Validating Compose configuration"
+
+"$REPO_ROOT/dc" config >/dev/null
+
+printf '✓ Compose configuration valid\n'
 
 
 # --------------------------------------------------
@@ -103,9 +161,15 @@ step "Installing internal DNS monitor"
 
 sudo "$REPO_ROOT/services/internal-dns-monitor/install.sh"
 
-sudo systemctl enable --now internal-dns-monitor.timer
+sudo systemctl enable --now "$DNS_MONITOR_TIMER"
 
-printf '✓ Internal DNS monitor installed and timer enabled\n'
+sudo systemctl is-enabled --quiet "$DNS_MONITOR_TIMER" \
+    || die "$DNS_MONITOR_TIMER is not enabled"
+
+sudo systemctl is-active --quiet "$DNS_MONITOR_TIMER" \
+    || die "$DNS_MONITOR_TIMER is not active"
+
+printf '✓ Internal DNS monitor installed, enabled, and active\n'
 
 
 # --------------------------------------------------
@@ -125,7 +189,13 @@ sudo install -m 0644 \
 sudo systemctl daemon-reload
 sudo systemctl enable --now "$IMAGE_CHECK_TIMER"
 
-printf '✓ %s installed and enabled\n' "$IMAGE_CHECK_TIMER"
+sudo systemctl is-enabled --quiet "$IMAGE_CHECK_TIMER" \
+    || die "$IMAGE_CHECK_TIMER is not enabled"
+
+sudo systemctl is-active --quiet "$IMAGE_CHECK_TIMER" \
+    || die "$IMAGE_CHECK_TIMER is not active"
+
+printf '✓ %s installed, enabled, and active\n' "$IMAGE_CHECK_TIMER"
 
 
 # --------------------------------------------------
@@ -223,6 +293,7 @@ step "IX deployment complete"
 
 printf 'Repository:          %s\n' "$REPO_ROOT"
 printf 'Machine:             %s\n' "$MACHINE_ID"
+printf 'Compose environment: %s\n' "$ENV_FILE"
 printf 'Git origin:          %s\n' "$FINAL_ORIGIN"
 printf 'Deploy private key:  %s\n' "$DEPLOY_KEY"
 printf 'Deploy public key:   %s\n' "$DEPLOY_KEY_PUB"

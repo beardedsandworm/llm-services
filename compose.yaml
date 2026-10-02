@@ -95,7 +95,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
-      - "10.42.20.5:2375:2375"
+      - "${IX_LAN_IP}:2375:2375"
     read_only: true
     tmpfs:
       - /run

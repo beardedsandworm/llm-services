@@ -8,7 +8,7 @@ STATE_DIR=/var/lib/internal-dns-monitor
 DOC_DIR=/usr/local/share/doc/internal-dns-monitor
 
 if [ "${EUID}" -ne 0 ]; then
-  printf '%s\n' 'Run as root to install files; this script never enables or starts the timer.' >&2
+  printf '%s\n' 'Run as root to install internal DNS monitor files.' >&2
   exit 1
 fi
 
@@ -22,4 +22,4 @@ if [ ! -e "$CONFIG_DIR/config.env" ]; then
   install -m 0640 -o root -g lightweight "$SOURCE_DIR/config.env.example" "$CONFIG_DIR/config.env"
 fi
 systemctl daemon-reload
-printf '%s\n' 'Installed only. Review /etc/internal-dns-monitor/config.env, then enable the timer explicitly if approved.'
+printf '%s\n' 'Installed internal DNS monitor files and systemd units.'
