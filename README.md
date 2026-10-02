@@ -96,6 +96,14 @@ Host bootstrap, packages, machine identity, SSH credentials, age identity, WireG
 linux-environments
 ```
 
+The canonical `llm-services` checkout on IX is:
+
+```text
+/srv/ix/llm-services
+```
+
+Repo-owned host integrations, including the image-check systemd unit, must reference that canonical checkout rather than a historical home-directory path.
+
 `llm-services` begins where the IX host bootstrap ends.
 
 ---
@@ -112,7 +120,8 @@ llm-services/
 │   └── ...
 │
 ├── env/
-│   └── server02.env
+│   ├── server02.env
+│   └── server02.env.example
 │
 ├── scripts/
 │   ├── decrypt-secrets.sh
@@ -124,6 +133,8 @@ llm-services/
 │
 ├── secrets/
 │   └── server02/
+│       ├── env/
+│       │   └── server02.env.enc
 │       └── *.enc
 │
 ├── runtime/
@@ -339,7 +350,7 @@ They should remain separate.
 
 # 🔐 Secrets
 
-Encrypted service secrets live under:
+Encrypted service-secret authority lives under:
 
 ```text
 secrets/server02/
@@ -353,11 +364,13 @@ SOPS + IX's age identity
 
 IX's age identity itself belongs to the machine recovery process in `linux-environments`.
 
+Ordinary service credentials are stored as SOPS-encrypted recovery artifacts. Plaintext runtime material is local deployment state and must never be committed.
+
 ---
 
 ## Runtime Secrets
 
-Encrypted sources are materialized under:
+Top-level encrypted service-secret sources are materialized under:
 
 ```text
 runtime/server02/secrets/
@@ -369,9 +382,61 @@ using:
 ./scripts/decrypt-secrets.sh
 ```
 
-Runtime plaintext must never be committed.
+The normal contract is:
 
-Standalone runtime components should consume the centrally materialized secret rather than inventing their own encryption/decryption workflow.
+```text
+secrets/server02/<secret>.enc
+        ↓
+decrypt-secrets.sh
+        ↓
+runtime/server02/secrets/<secret>
+        ↓
+service consumes runtime secret
+```
+
+For example, the Hermes n8n REST credential is recovered as:
+
+```text
+secrets/server02/n8n-leto-api-key.enc
+        ↓
+runtime/server02/secrets/n8n-leto-api-key
+        ↓
+read-only Hermes bind mount
+        ↓
+/run/secrets/n8n-leto-api-key
+```
+
+Hermes reads that file through `N8N_LETO_API_KEY_FILE`; the credential itself is not stored in Compose or in the tracked environment example.
+
+Standalone runtime components should consume centrally materialized secrets rather than inventing their own encryption/decryption workflow.
+
+---
+
+## Compose Environment Recovery
+
+The live Compose environment is:
+
+```text
+env/server02.env
+```
+
+It is ignored runtime/deployment state. The tracked safe schema/default is:
+
+```text
+env/server02.env.example
+```
+
+The authoritative encrypted recovery copy is:
+
+```text
+secrets/server02/env/server02.env.enc
+```
+
+`deploy.sh` restores the encrypted binary payload to `env/server02.env` with restrictive permissions before Compose is rendered.
+
+This nested recovery artifact is intentionally separate from the top-level runtime-secret scan performed by `scripts/decrypt-secrets.sh`.
+
+The `dc` wrapper always supplies the live environment explicitly, so Compose does not depend on an implicit repository-root `.env` file.
 
 ---
 
@@ -440,11 +505,17 @@ The primary deployment entry point is:
 Current deployment flow:
 
 ```text
-validate repository
+validate repository + required encrypted sources
         ↓
-decrypt secrets
+decrypt top-level runtime secrets
+        ↓
+restore env/server02.env from encrypted recovery
+        ↓
+validate required runtime secrets
         ↓
 bootstrap runtime
+        ↓
+./dc config
         ↓
 build Hermes
         ↓
@@ -452,7 +523,11 @@ build Hermes
         ↓
 install internal DNS monitor
         ↓
-install image-check timer
+enable + verify internal-dns-monitor.timer
+        ↓
+install image-check units
+        ↓
+enable + verify llm-services-image-check.timer
         ↓
 create / verify llm-services deploy key
         ↓
@@ -460,10 +535,12 @@ bind Git repository to deploy key
         ↓
 display public deploy key
         ↓
-Press Enter to continue
+pause only when running interactively
 ```
 
-The deployment script owns the IX application layer.
+The deployment script owns the complete IX application-layer reconciliation path. A successful deployment leaves repo-owned monitoring enabled and active rather than requiring a separate "enable later" step.
+
+When `deploy.sh` is invoked from an interactive terminal, it pauses after displaying the deploy key so the operator can register or capture it. Non-interactive bootstrap/recovery invocation does not block on that prompt.
 
 Host preparation remains the responsibility of `linux-environments`.
 
@@ -565,7 +642,27 @@ IX includes a repo-owned internal DNS monitor under:
 services/internal-dns-monitor/
 ```
 
-The installer reconciles its runtime integration and associated systemd automation.
+Its installer reconciles the monitor files, configuration scaffold, and systemd units. Installation and deployment intentionally have separate responsibilities:
+
+```text
+services/internal-dns-monitor/install.sh
+        ↓
+install / reconcile files and units
+
+./deploy.sh
+        ↓
+enable + start internal-dns-monitor.timer
+        ↓
+verify timer is enabled and active
+```
+
+The deployed runtime configuration lives under:
+
+```text
+/etc/internal-dns-monitor/
+```
+
+and is host runtime state rather than Git authority.
 
 The monitor validates the internal DNS path from IX's perspective rather than assuming that DNS works merely because the local resolver responds.
 
@@ -650,7 +747,15 @@ This keeps the base recovery path smaller while preserving a route toward increa
 
 # 🛠️ `dc` Wrapper
 
-Use the repository wrapper for Compose lifecycle operations:
+Use the repository wrapper for Compose lifecycle operations. The wrapper uses the canonical repository root and explicitly loads:
+
+```text
+env/server02.env
+```
+
+so Compose behavior does not depend on the caller's working directory or an implicit root `.env` file.
+
+Common operations:
 
 ```bash
 ./dc config
@@ -709,9 +814,11 @@ Current monitoring includes:
 ```text
 llm-services-image-check.service
 llm-services-image-check.timer
+internal-dns-monitor.service
+internal-dns-monitor.timer
 ```
 
-and the internal DNS monitoring service.
+`deploy.sh` installs and enables the repo-owned timers and verifies that they are active.
 
 Monitoring should answer questions such as:
 
@@ -732,6 +839,14 @@ The same Wormlogic policy applies here:
 > **Silence is success.**
 
 Healthy steady-state operation should not generate unnecessary noise.
+
+For image checks specifically:
+
+```text
+updates found → notify Discord
+errors        → notify Discord
+no updates    → stdout / journal only
+```
 
 Notifications should represent:
 
