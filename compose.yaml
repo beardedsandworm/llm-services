@@ -47,7 +47,7 @@ services:
       - "/home/lightweight/.ssh/id_ed25519_leto:/opt/data/.ssh/id_ed25519_leto:ro"
       - "/home/lightweight/.ssh/config:/opt/data/.ssh/config:ro"
       # Root-managed, read-only n8n API key; never version the value.
-      - "/etc/wormlogic/secrets/n8n-leto-api-key:/run/secrets/n8n-leto-api-key:ro"
+      - "./runtime/server02/secrets/n8n-leto-api-key:/run/secrets/n8n-leto-api-key:ro"
       
       # Shared model/cache area for future local inference.
       - "${HERMES_MODELS}:/models"

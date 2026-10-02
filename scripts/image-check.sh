@@ -314,7 +314,4 @@ EOF
 
 printf '%s\n' "${MESSAGE}"
 
-send_discord_success \
-  "Image Check Passed" \
-  "${MESSAGE}" \
-  "docker-image-check"
+exit 0

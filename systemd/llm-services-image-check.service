@@ -6,6 +6,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=lightweight
-WorkingDirectory=/home/lightweight/llm-services
+WorkingDirectory=/srv/ix/llm-services
 Environment=MACHINE_ID=server02
-ExecStart=/home/lightweight/llm-services/scripts/image-check.sh
+ExecStart=/srv/ix/llm-services/scripts/image-check.sh

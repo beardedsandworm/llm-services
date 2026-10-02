@@ -9,6 +9,7 @@ RUNTIME_DIR="${REPO_ROOT}/runtime/${MACHINE_ID}/secrets"
 
 text_secrets=(
   "leto_ops_ingress_token"
+  "n8n-leto-api-key"
 )
 
 mkdir -p "${RUNTIME_DIR}"
