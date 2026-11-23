@@ -20,6 +20,8 @@ RUN apt-get update \
         rsync \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 # Hermes intentionally keeps several capabilities optional/lazy upstream.
 # In our container image they are explicit so launch never depends on a
 # runtime package install.
